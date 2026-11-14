@@ -1,0 +1,35 @@
+# Secrets and saved logins - never commit these
+.env
+.spotify_cache
+.cache
+
+# Generated audio and Python junk
+static/speech*.wav
+static/speech*.wav.part
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Minecraft
+minecraft_server/
+minecraft_bot/node_modules/
+minecraft_bot/bot_state.json
+
+# Added
+node_modules/
+*.log
+*.part
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Large model files (uncomment/adjust if you have them in the folder)
+*.pt
+*.pth
+*.onnx
+*.bin
+*.safetensors
+*.gguf

@@ -1,0 +1,21 @@
+{
+  "name": "remielle-minecraft-bot",
+  "version": "1.0.0",
+  "description": "Remielle's in-game body: a Mineflayer bot with a small local control API.",
+  "private": true,
+  "type": "module",
+  "main": "bot.js",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node bot.js",
+    "setup-server": "node setup_server.mjs",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "mineflayer": "4.39.0",
+    "mineflayer-auto-eat": "5.0.3",
+    "mineflayer-collectblock": "1.6.0",
+    "mineflayer-pathfinder": "2.4.5",
+    "vec3": "0.1.10"
+  }
+}

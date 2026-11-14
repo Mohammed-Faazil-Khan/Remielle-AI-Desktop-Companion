@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Remielle</title>
+    <link rel="manifest" href="/static/manifest.webmanifest">
+    <link rel="icon" href="/static/icons/icon-192.png">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <meta name="theme-color" content="#0f0c1b">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background: linear-gradient(135deg, #1e1e2f 0%, #0f0c1b 100%) !important; 
+            font-family: monospace;
+        }
+        #canvas-container { width: 100vw; height: 100vh; }
+        #status-badge { 
+            position: absolute; 
+            bottom: 20px; 
+            left: 50%; 
+            transform: translateX(-50%); 
+            background: rgba(0, 0, 0, 0.6); 
+            color: #00ffcc; 
+            padding: 8px 16px; 
+            border-radius: 20px; 
+            font-size: 13px; 
+            letter-spacing: 1px;
+            border: 1px solid rgba(0, 255, 204, 0.3);
+            pointer-events: none; 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            text-align: center;
+        }
+        #transcript-box {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.85);
+            color: #00ffcc;
+            padding: 12px 24px;
+            border-radius: 12px;
+            font-size: 15px;
+            font-family: sans-serif;
+            display: none;
+            pointer-events: none;
+            max-width: 85%;
+            text-align: center;
+            border: 1px solid rgba(0, 255, 204, 0.4);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.7);
+            z-index: 999;
+        }
+        #error-log { position: absolute; top: 10px; left: 10px; color: #ff5555; font-size: 14px; font-weight: bold; z-index: 9999; pointer-events: none; }
+        /* The one Minecraft switch: the game, her bot and her own goals, all together. */
+        #mc-button {
+            position: absolute; top: 10px; right: 10px; z-index: 999;
+            padding: 7px 13px; border-radius: 16px; cursor: pointer;
+            background: rgba(0, 0, 0, 0.6); color: #8f8fa3;
+            border: 1px solid rgba(0, 255, 204, 0.25);
+            font-family: sans-serif; font-size: 12px; letter-spacing: 0.5px;
+            user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+        }
+        #mc-button.on { color: #00ffcc; border-color: rgba(0, 255, 204, 0.7); }
+        #mc-button.waiting { color: #ffcc00; }
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8); color: white; display: flex;
+            align-items: center; justify-content: center; z-index: 1000;
+            cursor: pointer; font-size: 18px; font-family: sans-serif;
+        }
+        /* A phone has no spacebar, so the button you hold is on the screen instead. */
+        #talk-button {
+            display: none;
+            position: absolute;
+            bottom: calc(24px + env(safe-area-inset-bottom));
+            left: 50%; transform: translateX(-50%);
+            width: 112px; height: 112px; border-radius: 50%;
+            background: radial-gradient(circle at 35% 30%, #ff8fd0, #a34bd8 60%, #4b1f7a);
+            color: #fff; font-family: sans-serif; font-size: 15px; font-weight: bold;
+            line-height: 1.2; text-align: center;
+            border: 2px solid rgba(0, 255, 204, 0.55);
+            box-shadow: 0 6px 24px rgba(0,0,0,0.6);
+            align-items: center; justify-content: center;
+            user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+            touch-action: none; z-index: 999;
+        }
+        body.touch #talk-button { display: flex; }
+        body.touch #talk-button.held { transform: translateX(-50%) scale(0.93); border-color: #ffcc00; }
+        body.touch #status-badge { bottom: 158px; }
+        body.touch #transcript-box { bottom: 214px; font-size: 14px; }
+        @media (max-height: 520px) {
+            body.touch #status-badge { bottom: 8px; }
+            body.touch #transcript-box { bottom: 56px; }
+        }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/static/lib/three.module.js",
+          "three/addons/": "/static/lib/",
+          "@pixiv/three-vrm": "/static/lib/three-vrm.module.js"
+        }
+      }
+    </script>
+</head>
+<body>
+    <div id="overlay">Click anywhere to wake Remielle</div>
+    <div id="error-log"></div>
+    <div id="transcript-box"></div>
+    <div id="status-badge">IDLE - Ready<br><span style="font-size:10px; color:#aaa;">(Hold SPACE to talk)</span></div>
+    <div id="canvas-container"></div>
+    <div id="talk-button">Hold<br>to talk</div>
+    <div id="mc-button">MINECRAFT: OFF</div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { VRMLoaderPlugin } from '@pixiv/three-vrm';
+
+        const logElement = document.getElementById('error-log');
+        const statusBadge = document.getElementById('status-badge');
+        const transcriptBox = document.getElementById('transcript-box');
+        const overlay = document.getElementById('overlay');
+        const talkButton = document.getElementById('talk-button');
+        const mcButton = document.getElementById('mc-button');
+        function logError(msg) { console.error(msg); logElement.textContent = msg; }
+
+        // A phone has no spacebar and no PC microphone to reach, so it gets a button and its own microphone.
+        const IS_TOUCH = window.matchMedia('(pointer: coarse)').matches;
+        if (IS_TOUCH) {
+            document.body.classList.add('touch');
+            overlay.textContent = 'Tap anywhere to wake Remielle';
+        }
+
+        // The launcher prints a link with ?token=... in it. Keep that token, then hide it from the address bar,
+        // so the home-screen app can still get in tomorrow without you typing anything.
+        const query = new URLSearchParams(location.search);
+        if (query.get('token')) {
+            try { localStorage.setItem('remielle_token', query.get('token')); } catch (e) {}
+            history.replaceState(null, '', location.pathname);
+        }
+        let ACCESS_TOKEN = '';
+        try { ACCESS_TOKEN = localStorage.getItem('remielle_token') || ''; } catch (e) {}
+        let SPEAK_KEY = '';   // she hands out one per screen, and only that screen may use her voice
+
+        if ('serviceWorker' in navigator && window.isSecureContext) {
+            navigator.serviceWorker.register('/sw.js').catch(() => {});
+        }
+
+        // Guard: if the module imports failed, THREE won't exist. Show a visible error early.
+        if (typeof THREE === 'undefined') {
+            logError("Three.js did not load — the avatar cannot render. Check static/lib/ or reload.");
+        }
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 20);
+        camera.position.set(0, 1.4, 2.5);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setClearColor(0x000000, 0); 
+        THREE.ColorManagement.enabled = true;
+        renderer.outputColorSpace = THREE.SRGBColorSpace; 
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        const light = new THREE.DirectionalLight(0xfff0dd, 1.0);
+        light.position.set(1.0, 1.2, 1.5).normalize();
+        scene.add(light);
+
+        const ambientLight = new THREE.AmbientLight(0x90b0ff, 0.6);
+        scene.add(ambientLight);
+
+        let currentVrm = null;
+        let vrmBones = {}; 
+        const clock = new THREE.Clock();
+
+        // ===== ALIVE PATCH: state & helpers =====
+        const damp = (cur, target, lambda, dt) => cur + (target - cur) * (1 - Math.exp(-lambda * dt));
+
+        // Eyes follow this object (vrm.lookAt.target)
+        const lookTarget = new THREE.Object3D();
+        lookTarget.position.set(0, 1.4, 2.5);
+        scene.add(lookTarget);
+
+        let emotionNow = 'relaxed';
+        const EMO_STRENGTH = { happy: 0.55, sad: 0.7, angry: 0.5, surprised: 0.8, relaxed: 0.5 };
+        const exprCur = { happy: 0, sad: 0, angry: 0, surprised: 0, relaxed: 0 };
+        const visCur = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0 };
+
+        let speechEnergy = 0, gesture = 0, wingPhase = 0, fingerCurl = 0.3;
+        let nextBlink = 2.5, blinkT = -1;
+        let lookYaw = 0, lookPitch = 0, wanderTimer = 0, wanderX = 0, wanderY = 0;
+        let eyeX = 0, eyeY = 0, eyeTimer = 0, eyeTX = 0, eyeTY = 0;
+
+        const baseQ = {};          // pose quaternions (no procedural motion on top)
+        const fingerBones = [];
+        const _e = new THREE.Euler(), _q = new THREE.Quaternion();
+        // ===== END ALIVE PATCH: state & helpers =====
+
+        // ===== BACKGROUNDS (press B to cycle) =====
+        const BACKGROUNDS = [
+            { name: 'Starry night', css:
+                'radial-gradient(1.5px 1.5px at 20% 30%, #fff, transparent), radial-gradient(1px 1px at 70% 20%, #fff, transparent), ' +
+                'radial-gradient(1.5px 1.5px at 40% 70%, #fff, transparent), radial-gradient(1px 1px at 85% 60%, #fff, transparent), ' +
+                'radial-gradient(1px 1px at 10% 80%, #fff, transparent), radial-gradient(1px 1px at 55% 12%, #fff, transparent), ' +
+                'radial-gradient(1.5px 1.5px at 92% 88%, #fff, transparent), radial-gradient(1px 1px at 30% 45%, #fff, transparent), ' +
+                'linear-gradient(180deg, #0b1026 0%, #1b2a5c 60%, #3a2d6b 100%)' },
+            { name: 'Sakura sunset', css: 'linear-gradient(160deg, #ffb5c8 0%, #c9a0dc 45%, #4b3b7a 100%)' },
+            { name: 'Neon city', css:
+                'radial-gradient(circle at 20% 20%, rgba(0,255,204,0.25), transparent 40%), ' +
+                'radial-gradient(circle at 80% 80%, rgba(255,51,102,0.25), transparent 45%), ' +
+                'linear-gradient(135deg, #0a0a1a, #1a0b2e)' },
+            { name: 'Soft studio', css: 'radial-gradient(circle at 50% 35%, #ffffff 0%, #e9e4f5 55%, #cfc5e8 100%)' },
+            { name: 'Midnight (original)', css: 'linear-gradient(135deg, #1e1e2f 0%, #0f0c1b 100%)' }
+        ];
+        let bgIndex = 0;   // <-- which background shows at startup (0 = first in the list above)
+        function applyBackground() {
+            document.body.style.setProperty('background', BACKGROUNDS[bgIndex].css, 'important');
+        }
+        applyBackground();
+
+        // Your own image: save it as static/background.jpg and it is added to the list automatically.
+        const bgProbe = new Image();
+        bgProbe.onload = () => {
+            BACKGROUNDS.push({ name: 'Your image', css: 'url(/static/background.jpg) center / cover no-repeat' });
+        };
+        bgProbe.src = '/static/background.jpg';
+
+        window.addEventListener('keydown', (e) => {
+            if (e.code !== 'KeyB' || e.repeat || overlay.style.display !== 'none') return;
+            bgIndex = (bgIndex + 1) % BACKGROUNDS.length;
+            applyBackground();
+            if (assistantState === 'idle') {
+                transcriptBox.style.display = 'block';
+                transcriptBox.textContent = "🖼️ " + BACKGROUNDS[bgIndex].name;
+                setTimeout(() => { if (assistantState === 'idle') transcriptBox.style.display = 'none'; }, 1500);
+            }
+        });
+        // ===== END BACKGROUNDS =====
+
+        const mouse = new THREE.Vector2(0, 0);
+        let isMouseInWindow = false;
+        let idleLookTimer = 0;
+        let idleTargetX = 0, idleTargetY = 0;
+
+        window.addEventListener('mousemove', (event) => {
+            isMouseInWindow = true;
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        });
+        document.addEventListener('mouseleave', () => { isMouseInWindow = false; });
+        document.addEventListener('mouseenter', () => { isMouseInWindow = true; });
+
+        const loader = new GLTFLoader();
+        loader.register((parser) => new VRMLoaderPlugin(parser));
+
+        const POSES = {
+            idle: {
+                leftUpperArm: {x: 0, y: 0, z: 1.2}, rightUpperArm: {x: 0, y: 0, z: -1.2}, 
+                leftLowerArm: {x: 0, y: 0, z: 0}, rightLowerArm: {x: 0, y: 0, z: 0},
+                neck: {x: 0, y: 0, z: 0}, spine: {x: 0, y: 0, z: 0}
+            },
+            thinking: {
+                leftUpperArm: {x: -0.4, y: -0.3, z: 0.9}, rightUpperArm: {x: 0, y: 0, z: -1.2}, 
+                leftLowerArm: {x: -1.6, y: 0.4, z: 0}, rightLowerArm: {x: 0, y: 0, z: 0},
+                neck: {x: 0.05, y: 0.2, z: 0.1}, spine: {x: 0, y: 0, z: 0}
+            }
+        };
+
+        // ===== ALIVE PATCH: extra poses =====
+        // Builds a left/right mirrored arm pose from four numbers:
+        //   up      = how close the upper arm hangs to the body (z, bigger = closer, max ~1.55)
+        //   fwd     = upper arm swing forward (x, positive = forward)
+        //   bend    = elbow bend, forearm comes forward (lower arm y, mirrored)
+        //   inward  = forearm swings toward the body centre (lower arm x, same sign on both sides)
+        // If the elbows bend backward, flip the sign of `bend` below.
+        function armPose(up, fwd, bend, inward) {
+            return {
+                leftUpperArm:  {x: fwd, y: 0, z: up},       rightUpperArm: {x: fwd, y: 0, z: -up},
+                leftLowerArm:  {x: -inward, y: -bend, z: 0}, rightLowerArm: {x: -inward, y: bend, z: 0},
+                neck: {x: 0, y: 0, z: 0}, spine: {x: 0, y: 0, z: 0}
+            };
+        }
+        //                         up    fwd   bend  inward
+        // Arms rest down at her sides in every state (no hand folding). Same pose for idle / listening / speaking,
+        // so nothing changes in her arms when she starts to talk.
+        //                  up    fwd   bend  inward
+        // `up` is how close the arms hang to her body: lower = arms further out from the skirt (T-pose is 0).
+        // If her fingers still clip the outfit, lower it a bit more (1.15, 1.10 ...). If the arms look too far out, raise it.
+        const REST_ARMS = [1.22, 0.04, 0.12, 0.0];    // a tiny natural elbow bend; set `bend` to 0 for fully straight arms
+        POSES.idle      = armPose(...REST_ARMS);
+        POSES.listening = armPose(...REST_ARMS);
+        POSES.speaking  = armPose(...REST_ARMS);
+        const GESTURE_AMOUNT = 0.25;   // how much the hands move while she talks (0 = frozen, 1 = old behaviour)
+        // ===== END ALIVE PATCH: extra poses =====
+
+        loader.load('/static/character.vrm', (gltf) => {
+            const vrm = gltf.userData.vrm;
+            if (vrm) {
+                currentVrm = vrm;
+                scene.add(vrm.scene);
+                vrm.scene.rotation.y = Math.PI; 
+                vrmBones = {
+                    leftUpperArm: vrm.humanoid.getNormalizedBoneNode('leftUpperArm'),
+                    rightUpperArm: vrm.humanoid.getNormalizedBoneNode('rightUpperArm'),
+                    leftLowerArm: vrm.humanoid.getNormalizedBoneNode('leftLowerArm'),
+                    rightLowerArm: vrm.humanoid.getNormalizedBoneNode('rightLowerArm'),
+                    neck: vrm.humanoid.getNormalizedBoneNode('neck'),
+                    head: vrm.humanoid.getNormalizedBoneNode('head'),
+                    spine: vrm.humanoid.getNormalizedBoneNode('spine'),
+                    chest: vrm.humanoid.getNormalizedBoneNode('chest'),
+                    leftWingA: vrm.scene.getObjectByName('Skn_L_WingA_01'), rightWingA: vrm.scene.getObjectByName('Skn_R_WingA_01'),
+                    leftWingC: vrm.scene.getObjectByName('Skn_L_WingC_01'), rightWingC: vrm.scene.getObjectByName('Skn_R_WingC_01'),
+                    leftWingD: vrm.scene.getObjectByName('Ctr_L_WingD_01'), rightWingD: vrm.scene.getObjectByName('Ctr_R_WingD_01')
+                };
+
+                // ===== ALIVE PATCH: extra bones =====
+                const N = (n) => vrm.humanoid.getNormalizedBoneNode(n);
+                for (const n of ['hips', 'upperChest', 'leftHand', 'rightHand']) vrmBones[n] = N(n);
+
+                for (const side of ['left', 'right']) {
+                    for (const f of ['Index', 'Middle', 'Ring', 'Little']) {
+                        for (const [seg, k] of [['Proximal', 1.0], ['Intermediate', 1.2], ['Distal', 0.6]]) {
+                            const b = N(side + f + seg);
+                            // sign: +1 left / -1 right curls the fingers inward toward the palm on this VRM.
+                            // If they ever curl backward, swap to side === 'left' ? -1 : 1.
+                            if (b) fingerBones.push({ bone: b, sign: side === 'left' ? 1 : -1, k: k * (f === 'Little' ? 1.15 : 1) });
+                        }
+                    }
+                }
+                if (vrm.lookAt) vrm.lookAt.target = lookTarget;
+                // ===== END ALIVE PATCH: extra bones =====
+
+                applyPoseInstant('idle');
+            } else {
+                logError("static/character.vrm loaded but contains no VRM data. In VRoid Studio use Export > VRM (not Save as a .vroid project).");
+            }
+        }, undefined, (err) => {
+            // Without this callback a bad model fails silently and the screen stays empty.
+            logError("Could not load static/character.vrm. It must be a real .vrm exported from VRoid Studio, not the .vroid project file. " + (err && err.message ? err.message : ""));
+        });
+
+        let assistantState = 'idle';
+        let transitionProgress = 1.0;
+        const transitionDuration = 0.8;
+        let startQuaternions = {}, targetQuaternions = {};
+
+        let audioContext, analyser, dataArray, audioElement;
+        let isSpeaking = false;
+
+        function resetToIdle() {
+            isSpeaking = false;
+            assistantState = 'idle';
+            emotionNow = 'relaxed';   // ALIVE PATCH
+            startTransitionTo('idle');
+            updateBadge();
+            transcriptBox.style.display = 'none';
+            try { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ action: "ui_idle" })); } catch (e) {}
+        }
+
+        async function triggerAndPlaySpeech(speechText) {
+            try {
+                const response = await fetch(`/speak?text=${encodeURIComponent(speechText)}&key=${encodeURIComponent(SPEAK_KEY)}`);
+                const data = await response.json();
+                if (data.status === 'success') {
+                    initAudio(data.audio_url);
+                    return;
+                }
+                logError("TTS failed: " + (data.message || "unknown error"));
+            } catch(err) { logError("Speech fetch error: " + err); }
+            resetToIdle();   // never leave the UI stuck in 'speaking' (SPACE is ignored unless idle)
+        }
+
+        function initAudio(url) {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                audioElement = new Audio();
+                const source = audioContext.createMediaElementSource(audioElement);
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 256;
+                analyser.smoothingTimeConstant = 0.4;   // ALIVE PATCH: snappier lip sync (default 0.8 lags)
+                source.connect(analyser);
+                analyser.connect(audioContext.destination);
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+            }
+            audioElement.onended = resetToIdle;
+            audioElement.onerror = () => { logError("Audio playback error"); resetToIdle(); };
+            audioElement.src = url + "?t=" + new Date().getTime();
+            audioContext.resume().catch(() => {});
+            audioElement.play()
+                .then(() => { isSpeaking = true; })
+                .catch((err) => { logError("Audio play failed: " + err); resetToIdle(); });
+        }
+
+        function updateBadge() {
+            const hold = IS_TOUCH ? "the button" : "SPACE";
+            if (assistantState === 'speaking') {
+                statusBadge.innerHTML = "SPEAKING...<br><span style='font-size:10px; color:#aaa;'>(Please wait)</span>";
+                statusBadge.style.color = "#ffcc00";
+            } else if (assistantState === 'listening') {
+                statusBadge.innerHTML = "LISTENING...<br><span style='font-size:10px; color:#aaa;'>(Release " + hold + " to send)</span>";
+                statusBadge.style.color = "#ff3366";
+            } else if (assistantState === 'thinking') {
+                statusBadge.innerHTML = "THINKING...<br><span style='font-size:10px; color:#aaa;'>(Executing tools & LLM)</span>";
+                statusBadge.style.color = "#ffcc00";
+            } else {
+                statusBadge.innerHTML = "IDLE - Ready<br><span style='font-size:10px; color:#aaa;'>(Hold " + hold + " to talk)</span>";
+                statusBadge.style.color = "#00ffcc";
+            }
+        }
+
+        // ===== ALIVE PATCH: pose helpers =====
+        function applyPoseInstant(poseName) {
+            const pose = POSES[poseName] || POSES.idle;
+            for (const [name, bone] of Object.entries(vrmBones)) {
+                if (bone && pose[name]) {
+                    bone.rotation.set(pose[name].x, pose[name].y, pose[name].z);
+                    baseQ[name] = bone.quaternion.clone();
+                }
+            }
+        }
+
+        function startTransitionTo(poseName) {
+            const target = POSES[poseName] || POSES.idle;
+            transitionProgress = 0.0;
+            for (const [name, bone] of Object.entries(vrmBones)) {
+                if (bone && target[name]) {
+                    startQuaternions[name] = (baseQ[name] || bone.quaternion).clone();
+                    targetQuaternions[name] = new THREE.Quaternion().setFromEuler(
+                        new THREE.Euler(target[name].x, target[name].y, target[name].z));
+                }
+            }
+        }
+
+        // ---------- FACE: emotions, blinking, visemes ----------
+        function setExpr(em, name, v) { try { em.setValue(name, v); } catch (e) {} }
+
+        // Rough viseme guess from the spectrum (analyser fftSize 256 -> ~187 Hz per bin at 48 kHz)
+        function computeVisemes() {
+            analyser.getByteFrequencyData(dataArray);
+            const avg = (a, b) => { let s = 0; for (let i = a; i < b; i++) s += dataArray[i]; return s / (b - a) / 255; };
+            const low = avg(1, 4), mid = avg(4, 9), high = avg(9, 20);
+            const total = low + mid + high + 0.0001;
+            const open = Math.min(total * 0.9, 1);        // TUNE: loudness -> how wide the mouth opens
+            const v = {
+                aa: open * (mid / total) * 1.6,
+                oh: open * (low / total) * 1.1,
+                ou: open * (low / total) * 0.5,
+                ee: open * (high / total) * 1.3,
+                ih: open * (high / total) * 0.7
+            };
+            const sum = v.aa + v.oh + v.ou + v.ee + v.ih;
+            if (sum > 1) for (const k in v) v[k] /= sum;
+            return v;
+        }
+
+        function updateFace(dt) {
+            const em = currentVrm.expressionManager;
+            if (!em) return;
+            const idle = assistantState === 'idle';
+
+            // emotion (from the [tag] the LLM sends), smoothly blended
+            for (const k of Object.keys(exprCur)) {
+                let target = (k === emotionNow) ? EMO_STRENGTH[k] * (idle ? 0.35 : 1) : 0;
+                if (k === 'happy' && assistantState === 'listening') target = Math.max(target, 0.2);
+                exprCur[k] = damp(exprCur[k], target, 4, dt);
+                setExpr(em, k, exprCur[k]);
+            }
+
+            // random blinks, with the occasional double blink
+            nextBlink -= dt;
+            if (nextBlink <= 0 && blinkT < 0) {
+                blinkT = 0;
+                nextBlink = Math.random() < 0.2 ? 0.25 : 2 + Math.random() * 4;
+            }
+            let blink = 0;
+            if (blinkT >= 0) {
+                blinkT += dt;
+                const p = blinkT / 0.18;
+                blink = p < 1 ? Math.sin(p * Math.PI) : 0;
+                if (p >= 1) blinkT = -1;
+            }
+            setExpr(em, 'blink', blink);
+
+            // lip sync
+            const t = (isSpeaking && analyser) ? computeVisemes() : { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0 };
+            let energy = 0;
+            for (const k of Object.keys(visCur)) {
+                visCur[k] = damp(visCur[k], Math.min(t[k], 1), 28, dt);
+                setExpr(em, k, visCur[k]);
+                energy += t[k];
+            }
+            speechEnergy = damp(speechEnergy, Math.min(energy, 1), 10, dt);
+
+            // eyes: small fast saccades + follow the mouse
+            eyeTimer -= dt;
+            if (eyeTimer <= 0) {
+                eyeTimer = 0.6 + Math.random() * 2.2;
+                eyeTX = (Math.random() - 0.5) * 0.15;
+                eyeTY = (Math.random() - 0.5) * 0.10;
+            }
+            eyeX = damp(eyeX, eyeTX, 18, dt);
+            eyeY = damp(eyeY, eyeTY, 18, dt);
+            const follow = isMouseInWindow ? 1 : 0;
+            lookTarget.position.set(mouse.x * 0.6 * follow + eyeX, 1.45 + mouse.y * 0.35 * follow + eyeY, 2.5);
+        }
+
+        // ---------- BODY: pose blend + procedural layers ----------
+        const COMPOSED = ['hips', 'spine', 'chest', 'upperChest', 'neck', 'head',
+                          'leftUpperArm', 'rightUpperArm', 'leftLowerArm', 'rightLowerArm', 'leftHand', 'rightHand'];
+
+        function compose(offs) {
+            for (const name of COMPOSED) {
+                const bone = vrmBones[name];
+                if (!bone) continue;
+                if (baseQ[name]) bone.quaternion.copy(baseQ[name]); else bone.quaternion.identity();
+                const o = offs[name];
+                if (o) {
+                    _q.setFromEuler(_e.set(o.x || 0, o.y || 0, o.z || 0));
+                    bone.quaternion.multiply(_q);
+                }
+            }
+        }
+
+        function updateBody(dt, time) {
+            // 1) blend between base poses
+            if (transitionProgress < 1.0) {
+                transitionProgress = Math.min(1, transitionProgress + dt / transitionDuration);
+                const t = transitionProgress;
+                const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+                for (const name of Object.keys(targetQuaternions)) {
+                    if (!baseQ[name]) baseQ[name] = new THREE.Quaternion();
+                    baseQ[name].slerpQuaternions(startQuaternions[name], targetQuaternions[name], ease);
+                }
+            }
+
+            const speaking = assistantState === 'speaking';
+            const listening = assistantState === 'listening';
+            const thinking = assistantState === 'thinking';
+            const sp = speechEnergy;
+            gesture = damp(gesture, speaking ? 1 : 0, 3, dt);
+
+            const breath = Math.sin(time * 1.6);
+            const sway = Math.sin(time * 0.5) * 0.03 + Math.sin(time * 0.83 + 1.0) * 0.015;
+
+            // 2) where the head points
+            let ty, tx;
+            if (isMouseInWindow) { ty = mouse.x * 0.35; tx = mouse.y * 0.2; }
+            else {
+                wanderTimer -= dt;
+                if (wanderTimer <= 0) {
+                    wanderTimer = 2.5 + Math.random() * 3;
+                    wanderY = (Math.random() - 0.5) * 0.5;
+                    wanderX = (Math.random() - 0.5) * 0.25;
+                }
+                ty = wanderY; tx = wanderX;
+            }
+            if (thinking) { ty = 0.35; tx = -0.1; }   // glance away while thinking
+            lookYaw = damp(lookYaw, ty, 3, dt);
+            lookPitch = damp(lookPitch, tx, 3, dt);
+
+            // 3) speech-driven nods and gestures
+            const nod = gesture * (Math.sin(time * 5.0) * 0.025 + Math.sin(time * 3.3) * 0.02) * (0.4 + sp);
+            const hm = gesture * GESTURE_AMOUNT;     // overall hand movement while talking
+            const fa = hm * (0.1 + sp * 0.25);
+
+            compose({
+                hips:          { z: sway * 0.5, y: sway * 0.4 },
+                spine:         { x: breath * 0.01 + (listening ? 0.06 : 0) + gesture * 0.02, z: -sway * 0.4 },
+                chest:         { x: breath * 0.02 + sp * 0.02, y: sway * 0.3 },
+                upperChest:    { x: breath * 0.01 },
+                neck:          { y: lookYaw * 0.6, x: lookPitch * 0.6 + nod,
+                                 z: Math.sin(time * 0.7) * 0.02 + (listening ? 0.1 : 0) + (thinking ? 0.08 : 0) },
+                head:          { y: lookYaw * 0.4, x: lookPitch * 0.4 + nod * 0.5 },
+                leftUpperArm:  { z: breath * 0.01 - sway * 0.5 },
+                rightUpperArm: { z: -breath * 0.01 - sway * 0.5 },
+                leftLowerArm:  { y: -fa * (0.5 + 0.5 * Math.sin(time * 2.3)) },
+                rightLowerArm: { y: fa * 0.8 * (0.5 + 0.5 * Math.sin(time * 2.9 + 1.3)) },
+                leftHand:      { z: hm * Math.sin(time * 3.7) * 0.25 * (0.3 + sp) },
+                rightHand:     { z: -hm * Math.sin(time * 3.1 + 0.8) * 0.25 * (0.3 + sp) }
+            });
+
+            // 4) relaxed, slightly curled fingers (flip `sign` in the loader if they curl backward)
+            // Resting fingers are only lightly curled: curling them toward the palm pushes them into the skirt/thigh.
+            const targetCurl = thinking ? 0.45 : 0.18;
+            fingerCurl = damp(fingerCurl, targetCurl, 4, dt);
+            const flutter = Math.sin(time * 1.1) * 0.03;
+            for (const f of fingerBones) f.bone.rotation.z = f.sign * (fingerCurl + flutter) * f.k * 1.5;
+
+            // 5) wings flutter harder when she talks
+            wingPhase += dt * (1.0 + sp * 0.8);
+            const amp = (10 + sp * 12) * Math.PI / 180;
+            const wa = Math.sin(wingPhase) * amp;
+            const wc = Math.sin(wingPhase - 0.5) * amp;
+            const wd = Math.sin(wingPhase - 1.0) * amp;
+            if (vrmBones.leftWingA)  vrmBones.leftWingA.rotation.z = wa;
+            if (vrmBones.leftWingC)  vrmBones.leftWingC.rotation.z = wc;
+            if (vrmBones.leftWingD)  vrmBones.leftWingD.rotation.z = wd;
+            if (vrmBones.rightWingA) vrmBones.rightWingA.rotation.z = -wa;
+            if (vrmBones.rightWingC) vrmBones.rightWingC.rotation.z = -wc;
+            if (vrmBones.rightWingD) vrmBones.rightWingD.rotation.z = -wd;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const dt = Math.min(clock.getDelta(), 0.05);
+            const time = clock.elapsedTime;
+            if (currentVrm) {
+                updateFace(dt);
+                updateBody(dt, time);
+                currentVrm.update(dt);   // AFTER posing, so hair/cloth spring bones react to this frame's motion
+            }
+            renderer.render(scene, camera);
+        }
+        animate();
+        // ===== END ALIVE PATCH: pose helpers / animate =====
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- WEBSOCKET, SPEECH AND THE TWO MICROPHONES ---
+        // On the PC, the microphone is Python's (ears_stt.PushToTalkRecorder + faster-whisper) and SPACE is
+        // the button. The browser's own speech API (webkitSpeechRecognition) is not used: it does not work
+        // reliably inside an embedded WebView window. A phone cannot reach that microphone, so on a touch
+        // screen this page records here, resamples to 16 kHz mono, and streams the bytes down the websocket.
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+        const ws = new WebSocket(wsProtocol + window.location.host + "/ws?token=" + encodeURIComponent(ACCESS_TOKEN));
+        ws.binaryType = 'arraybuffer';
+        ws.onopen = () => {
+            console.log("WebSocket connected");
+            ws.send(JSON.stringify({ action: "hello", device: IS_TOUCH ? "phone" : "pc", audio: true }));
+        };
+        ws.onclose = () => logError("Lost connection to the Python backend - restart the app.");
+        ws.onerror = () => logError("WebSocket error");
+
+        // ---------- this phone's microphone, streamed to the PC ----------
+        const MIC_WORKLET = `
+class PcmOut16 extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    const rate = (options.processorOptions || {}).inputRate || 48000;
+    this.step = rate / 16000;      // input samples consumed per output sample
+    this.pos = 0;                  // where the next chunk starts reading, carried across chunks
+    this.prev = 0;                 // the sample just before this chunk, for one clean interpolation
+  }
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (!ch) return true;
+    const out = new Int16Array(Math.max(1, Math.floor((ch.length + this.pos) / this.step) + 1));
+    let n = 0, p = this.pos;
+    while (p < ch.length) {
+      const i = Math.floor(p), frac = p - i;
+      const a = i === 0 ? this.prev : ch[i - 1];
+      const b = ch[Math.min(i, ch.length - 1)];
+      let v = a + (b - a) * frac;
+      v = v < -1 ? -1 : (v > 1 ? 1 : v);
+      out[n++] = v < 0 ? v * 32768 : v * 32767;
+      p += this.step;
+    }
+    this.pos = p - ch.length;
+    this.prev = ch[ch.length - 1];
+    if (n > 0) {
+      const bytes = out.slice(0, n).buffer;
+      this.port.postMessage(bytes, [bytes]);
+    }
+    return true;
+  }
+}
+registerProcessor('pcm-out-16', PcmOut16);
+`;
+        let micStream = null, micContext = null, micNode = null, micSending = false;
+
+        async function openPhoneMic() {
+            if (!window.isSecureContext) throw new Error("this page needs https for the microphone");
+            if (!micStream) {
+                micStream = await navigator.mediaDevices.getUserMedia({
+                    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
+                });
+            }
+            if (!micContext) {
+                micContext = new (window.AudioContext || window.webkitAudioContext)();
+                const moduleUrl = URL.createObjectURL(new Blob([MIC_WORKLET], { type: "application/javascript" }));
+                await micContext.audioWorklet.addModule(moduleUrl);
+                URL.revokeObjectURL(moduleUrl);
+                micNode = new AudioWorkletNode(micContext, "pcm-out-16",
+                    { processorOptions: { inputRate: micContext.sampleRate } });
+                micContext.createMediaStreamSource(micStream).connect(micNode);
+                micNode.port.onmessage = (event) => {
+                    if (micSending && ws.readyState === WebSocket.OPEN) ws.send(event.data);
+                };
+            }
+            await micContext.resume();
+        }
+
+        // ---------- push to talk: SPACE on the PC, the big button on a phone ----------
+        let holdingTalk = false;
+
+        async function beginTalk() {
+            if (overlay.style.display !== 'none' || assistantState !== 'idle' || holdingTalk) return;
+            if (ws.readyState !== WebSocket.OPEN) { logError("Not connected to backend."); return; }
+            transcriptBox.style.display = 'none';
+
+            let fromPhone = false;
+            if (IS_TOUCH) {
+                try {
+                    await openPhoneMic();
+                    fromPhone = true;
+                } catch (e) {
+                    logError("Phone mic off (" + e.message + ") - the PC is listening instead.");
+                    setTimeout(() => { if (assistantState === 'idle') logElement.textContent = ''; }, 6000);
+                }
+            }
+            micSending = fromPhone;
+            holdingTalk = true;
+            talkButton.classList.add('held');
+            assistantState = 'listening';
+            startTransitionTo('listening');
+            updateBadge();
+            ws.send(JSON.stringify({ action: "ptt_start", mic: fromPhone ? "phone" : "pc" }));
+        }
+
+        function endTalk() {
+            if (!holdingTalk) return;
+            holdingTalk = false;
+            micSending = false;
+            talkButton.classList.remove('held');
+            assistantState = 'thinking';
+            updateBadge();
+            transcriptBox.style.display = 'block';
+            transcriptBox.textContent = "🧠 Transcribing...";
+            ws.send(JSON.stringify({ action: "ptt_stop" }));
+        }
+
+        overlay.addEventListener('click', () => {
+            overlay.style.display = 'none';
+            if (typeof THREE === 'undefined') {
+                // The 3D engine never loaded — tell the user instead of going blank.
+                logError("3D engine failed to load. Check your internet or reload the page.");
+                statusBadge.innerHTML = "⚠️ ENGINE NOT LOADED<br><span style='font-size:10px; color:#ff5555;'>Reload the page (the JS libraries may have failed to download)</span>";
+                statusBadge.style.color = "#ff5555";
+                return;
+            }
+            assistantState = 'speaking';
+            startTransitionTo('speaking');   // ALIVE PATCH: was 'thinking'
+            updateBadge();
+            triggerAndPlaySpeech("Hello there! I'm Remielle... I've been waiting for you. "
+                + (IS_TOUCH ? "Hold the button at the bottom whenever you want to talk to me!"
+                            : "Just hold down the spacebar whenever you want to talk to me!"))
+                .catch(() => { resetToIdle(); });   // never leave UI stuck if TTS fails on first click
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (e.code !== 'Space') return;
+            e.preventDefault();
+            if (e.repeat) return;
+            beginTalk();
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'Space') { e.preventDefault(); endTalk(); }
+        });
+        // If the window loses focus while SPACE is held, keyup never fires - release anyway.
+        window.addEventListener('blur', endTalk);
+
+        talkButton.addEventListener('pointerdown', (e) => { e.preventDefault(); beginTalk(); });
+        talkButton.addEventListener('pointerup', (e) => { e.preventDefault(); endTalk(); });
+        talkButton.addEventListener('pointercancel', endTalk);
+        talkButton.addEventListener('pointerleave', endTalk);
+        talkButton.addEventListener('contextmenu', (e) => e.preventDefault());
+
+        // ---------- Minecraft mode: one switch for the game, her bot and her own goals ----------
+        function setMcChip(on, waiting) {
+            if (waiting) {
+                mcButton.textContent = on ? 'GOING IN...' : 'STANDING DOWN...';
+                mcButton.classList.toggle('waiting', true);
+                return;
+            }
+            mcButton.textContent = 'MINECRAFT: ' + (on ? 'ON' : 'OFF');
+            mcButton.classList.toggle('waiting', false);
+            mcButton.classList.toggle('on', !!on);
+        }
+
+        mcButton.addEventListener('click', () => {
+            if (overlay.style.display !== 'none') return;
+            if (ws.readyState !== WebSocket.OPEN) { logError("Not connected to backend."); return; }
+            if (assistantState !== 'idle') return;
+            const on = !mcButton.classList.contains('on');
+            setMcChip(on, true);
+            ws.send(JSON.stringify({ action: "mc_mode", on: on }));
+        });
+
+        ws.onmessage = async function(event) {
+            let payload = JSON.parse(event.data);
+            if (payload.speak_key) {
+                SPEAK_KEY = payload.speak_key;
+                setMcChip(payload.mc_mode, false);   // she tells the new screen how the switch really is
+                return;
+            }
+            if (typeof payload.mc_mode === 'boolean') { setMcChip(payload.mc_mode, false); return; }
+            assistantState = payload.state;
+            if (payload.emotion) emotionNow = payload.emotion;   // ALIVE PATCH: drive per-emotion expressions
+            updateBadge();
+
+            if (payload.error) {
+                transcriptBox.style.display = 'block';
+                transcriptBox.textContent = "⚠️ " + payload.error;
+                setTimeout(() => { if (assistantState === 'idle') transcriptBox.style.display = 'none'; }, 5000);
+            } else if (payload.heard) {
+                transcriptBox.style.display = 'block';
+                transcriptBox.textContent = "👂 Heard: " + payload.heard;
+            }
+
+            if (assistantState === 'speaking') {
+                startTransitionTo('speaking');   // ALIVE PATCH: was 'thinking'
+                transcriptBox.style.display = 'block';
+                transcriptBox.textContent = "💬 " + payload.text;
+                if (payload.speak === false) {
+                    // The other screen (the one you actually spoke into) is the one making the sound.
+                    ws.send(JSON.stringify({ action: "ui_idle" }));
+                    setTimeout(() => { if (assistantState === 'speaking') resetToIdle(); }, 4000);
+                } else {
+                    await triggerAndPlaySpeech(payload.text || "Hmm, I don't have anything to say.");
+                }
+            } else if (assistantState === 'thinking') {
+                startTransitionTo('thinking');
+            } else if (assistantState === 'idle') {
+                startTransitionTo('idle');
+            }
+        };
+    </script>
+</body>
+</html>
